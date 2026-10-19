@@ -1,0 +1,6 @@
+{
+  "name": "Fleet OS",
+  "description": "Araçlı işletmeler için merkezi işletim ve mali kontrol sistemi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

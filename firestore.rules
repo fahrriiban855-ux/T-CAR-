@@ -1,0 +1,252 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function userExists() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isSameTenant(targetTenantId) {
+      return userExists() && currentUserData().tenantId == targetTenantId;
+    }
+
+    function isAllowedBranch(targetBranchId) {
+      return userExists() && (
+        currentUserData().role == 'admin' ||
+        currentUserData().branchId == targetBranchId
+      );
+    }
+
+    function canAccessScopedDoc(data) {
+      return !('tenantId' in data) || (
+        isSameTenant(data.tenantId) &&
+        (!('branchId' in data) || isAllowedBranch(data.branchId))
+      );
+    }
+
+    function canWriteScopedDoc(data) {
+      return !('tenantId' in data) || (
+        isSameTenant(data.tenantId) &&
+        (!('branchId' in data) || isAllowedBranch(data.branchId))
+      );
+    }
+
+    function hasRole(allowedRoles) {
+      return userExists() && (currentUserData().role in allowedRoles);
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'tenantId', 'branchId']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+             data.role in ['admin', 'operation', 'finance', 'driver', 'owner'] &&
+             data.tenantId is string && data.tenantId.size() > 0 && data.tenantId.size() <= 64 &&
+             data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64;
+    }
+
+    function isValidVehicle(data) {
+      return data.keys().hasAll(['id', 'plate', 'brand', 'model', 'status', 'group', 'lastOdometer']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.plate is string && data.plate.size() >= 5 && data.plate.size() <= 20 &&
+             data.brand is string && data.brand.size() > 0 && data.brand.size() <= 64 &&
+             data.model is string && data.model.size() > 0 && data.model.size() <= 64 &&
+             data.status in ['available', 'in_custody', 'in_shift', 'maintenance', 'blocked'] &&
+             data.group is string && data.group.size() > 0 && data.group.size() <= 64 &&
+             data.lastOdometer is number && data.lastOdometer >= 0;
+    }
+
+    function isValidDriver(data) {
+      return data.keys().hasAll(['id', 'name', 'tc', 'phone', 'status']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 120 &&
+             data.tc is string && data.tc.size() == 11 &&
+             data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 25 &&
+             data.status in ['eligible', 'conditional', 'suspended'];
+    }
+
+    function isValidShift(data) {
+      return data.keys().hasAll(['id', 'vehicleId', 'driverId', 'status', 'startedAt', 'type', 'accrual', 'collection']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.vehicleId is string && data.vehicleId.size() > 0 && data.vehicleId.size() <= 128 &&
+             data.driverId is string && data.driverId.size() > 0 && data.driverId.size() <= 128 &&
+             data.status in ['pending_approval', 'active', 'completed', 'delayed'] &&
+             data.startedAt is string && data.startedAt.size() <= 64 &&
+             data.type is string && data.type.size() > 0 && data.type.size() <= 64 &&
+             data.accrual is number && data.accrual >= 0 &&
+             data.collection is number && data.collection >= 0;
+    }
+
+    function isValidCustody(data) {
+      return data.keys().hasAll(['id', 'vehicleId', 'driverId', 'status', 'handedOverAt', 'odometerOut']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.vehicleId is string && data.vehicleId.size() > 0 && data.vehicleId.size() <= 128 &&
+             data.driverId is string && data.driverId.size() > 0 && data.driverId.size() <= 128 &&
+             data.status in ['active', 'returned', 'disputed'] &&
+             data.handedOverAt is string && data.handedOverAt.size() <= 64 &&
+             data.odometerOut is number && data.odometerOut >= 0;
+    }
+
+    function isValidServiceCase(data) {
+      return data.keys().hasAll(['id', 'vehicleId', 'tenantId', 'branchId', 'status', 'entryOdometer', 'reason', 'deliveredBy', 'provider', 'estimatedExitAt', 'costBearer', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.vehicleId is string && data.vehicleId.size() > 0 && data.vehicleId.size() <= 128 &&
+             data.tenantId is string && data.tenantId.size() > 0 && data.tenantId.size() <= 64 &&
+             data.branchId is string && data.branchId.size() > 0 && data.branchId.size() <= 64 &&
+             data.status in ['open', 'closed'] &&
+             data.entryOdometer is number && data.entryOdometer >= 0 &&
+             data.costBearer in ['company', 'driver', 'owner', 'insurance'];
+    }
+
+    function isValidPenaltyIncident(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'branchId', 'vehicleId', 'plate', 'driverId', 'driverName', 'type', 'violationAt', 'amount', 'totalCharge', 'documentNo', 'status', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.type in ['traffic_fine', 'hgs_toll', 'accident_damage', 'downtime_loss'] &&
+             data.amount is number && data.amount >= 0 &&
+             data.totalCharge is number && data.totalCharge >= 0 &&
+             data.status in ['pending_collection', 'collected', 'disputed', 'legal_collection', 'cancelled'];
+    }
+
+    function isValidPlateOwner(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'branchId', 'ownerName', 'phone', 'iban', 'plate', 'vehicleId', 'periodMonth', 'monthlyBaseRent', 'deductedExpenses', 'paidAmount', 'status', 'updatedAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.monthlyBaseRent is number && data.monthlyBaseRent >= 0 &&
+             data.deductedExpenses is number && data.deductedExpenses >= 0 &&
+             data.paidAmount is number && data.paidAmount >= 0 &&
+             data.status in ['open', 'settled'];
+    }
+
+    function isValidLedgerEntry(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'branchId', 'type', 'amount', 'status', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.type in ['accrual', 'collection', 'expense', 'penalty_charge'] &&
+             data.amount is number && data.amount >= 0 &&
+             data.status in ['pending', 'settled'];
+    }
+
+    function isValidOtp(data) {
+      return !('code' in data) &&
+             data.keys().hasAll(['id', 'custodyId', 'tenantId', 'branchId', 'phone', 'codeHash', 'status', 'attempts', 'maxAttempts', 'expiresAt', 'resendAfter', 'createdAt']) &&
+             data.codeHash is string && data.codeHash.size() == 64 &&
+             data.status in ['requested', 'sent', 'verified', 'expired', 'consumed'];
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['id', 'title', 'type', 'priority', 'time', 'role']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 240 &&
+             data.priority in ['Kritik', 'Yüksek', 'Orta'];
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['auditId', 'tenantId', 'branchId', 'actorUserId', 'actorRole', 'action', 'entityType', 'entityId', 'createdAt', 'correlationId']) &&
+             data.actorUserId == request.auth.uid &&
+             data.actorRole == currentUserData().role &&
+             data.tenantId == currentUserData().tenantId;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || (userExists() && currentUserData().role == 'admin' && isSameTenant(resource.data.tenantId));
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                    request.resource.data.role == resource.data.role &&
+                    request.resource.data.tenantId == resource.data.tenantId &&
+                    request.resource.data.branchId == resource.data.branchId;
+      allow delete: if false;
+    }
+
+    match /vehicles/{vehicleId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'driver']) && isValidVehicle(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'finance', 'driver']) && isValidVehicle(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /drivers/{driverId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'driver']) && isValidDriver(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'finance', 'driver']) && isValidDriver(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /shifts/{shiftId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'finance', 'driver']) && isValidShift(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'finance', 'driver']) && isValidShift(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /custodies/{custodyId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'driver']) && isValidCustody(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'driver']) && isValidCustody(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /service_cases/{caseId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation']) && isValidServiceCase(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'finance']) && isValidServiceCase(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /penalties_incidents/{recordId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'finance']) && isValidPenaltyIncident(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'finance', 'driver']) && isValidPenaltyIncident(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /plate_owners/{ownerId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'finance', 'operation']) && isValidPlateOwner(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'finance', 'operation']) && isValidPlateOwner(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /ledger_entries/{entryId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'finance', 'operation', 'driver']) && isValidLedgerEntry(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'finance', 'operation']) && isValidLedgerEntry(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /otps/{otpId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'driver']) && isValidOtp(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'driver']) && isValidOtp(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if false;
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if hasRole(['admin', 'operation', 'finance']) && isValidTask(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update: if hasRole(['admin', 'operation', 'finance']) && isValidTask(request.resource.data) && canAccessScopedDoc(resource.data);
+      allow delete: if hasRole(['admin', 'operation', 'finance']) && canAccessScopedDoc(resource.data);
+    }
+
+    match /day_closes/{closeId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isSignedIn() && canAccessScopedDoc(resource.data);
+      allow create: if isSignedIn() && isValidAuditLog(request.resource.data) && canWriteScopedDoc(request.resource.data);
+      allow update, delete: if false;
+    }
+  }
+}
